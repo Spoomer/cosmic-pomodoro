@@ -1,5 +1,5 @@
 [package]
-name = "cosmic-app-template"
+name = "cosmic-pomodoro"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0"
@@ -30,18 +30,18 @@ features = ["fluent-system", "desktop-requester"]
 # Edit here to customize the package metadata
 # Especially the Assets section
 [package.metadata.deb]
-maintainer = "Your Name, <your@email.com>"
-copyright = "2024 Your Name"
-# license-file = "LICENSE"
+maintainer = "Spoomer, <spoomer@gmx.de>"
+copyright = "2024 Spoomer"
+license-file = "LICENSE"
 extended-description = """\
-Describe your app here. \
+Pomodoro timer. \
 """
 depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-    ["target/release/cosmic-app-template", "usr/bin/cosmic-app-template", "755"],
-    ["res/com.example.CosmicAppTemplate.metainfo.xml", "usr/share/metainfo/com.example.CosmicAppTemplate.metainfo.xml", "644"],
-    ["res/com.example.CosmicAppTemplate.desktop", "usr/share/applications/com.example.CosmicAppTemplate.desktop", "644"],
-#    ["res/icons/hicolor/", "usr/share/icons/hicolor/", "644"]
+    ["target/release/cosmic-pomodoro", "usr/bin/cosmic-pomodoro", "755"],
+    ["res/com.example.CosmicPomodoro.metainfo.xml", "usr/share/metainfo/com.example.CosmicPomodoro.metainfo.xml", "644"],
+    ["res/com.example.CosmicPomodoro.desktop", "usr/share/applications/com.example.CosmicPomodoro.desktop", "644"],
+    ["res/icons/hicolor/", "usr/share/icons/hicolor/", "644"]
 ]
