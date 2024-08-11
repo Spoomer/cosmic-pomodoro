@@ -1,4 +1,4 @@
-app-title = COSMIC App Template
+app-title = COSMIC Pomodoro
 about = About
-view = View
+menu = Menu
 welcome = Welcome to COSMIC! ✨

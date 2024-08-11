@@ -1,13 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::collections::HashMap;
-
-use crate::fl;
+use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::thread;
+use std::thread::sleep;
+use std::time::Duration;
+use crate::{fl, icon_cache};
 use cosmic::app::{Command, Core};
 use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self, icon, menu, nav_bar};
+use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::widget::{self, container, icon, menu, nav_bar, svg};
 use cosmic::{cosmic_theme, theme, Application, ApplicationExt, Apply, Element};
+use cosmic::iced::window::Id;
+use cosmic::iced_core::widget::operation::Focusable;
+use cosmic::theme::iced;
+use cosmic::widget::menu::Item::Button;
+use cosmic::iced::time;
+use crate::duration_extension::TimeDurationExt;
+use crate::icon_cache::IconCache;
 
 const REPOSITORY: &str = "https://github.com/Spoomer/cosmic-pomodoro";
 
@@ -20,9 +32,95 @@ pub struct CosmicPomodoro {
     context_page: ContextPage,
     /// Key bindings for the application's menu bar.
     key_binds: HashMap<menu::KeyBind, MenuAction>,
-    /// A model that contains all of the pages assigned to the nav bar panel.
-    nav: nav_bar::Model,
+    pomodoro_timer: PomodoroTimer,
 }
+
+struct PomodoroTimer{
+    pomodoro_lengths: Vec<PomodoroLength>,
+    position: usize,
+    pomodoro_state: PomodoroState,
+    pomodoro_phase: PomodoroPhase,
+    remaining_sec: Arc<AtomicU32>,
+    counter_pipe: Sender<bool>
+}
+impl PomodoroTimer{
+    fn new() -> Self {
+        let (to_pomodoro_timer, from_countdown) = mpsc::channel::<bool>();
+    
+        let remaining_sec = Arc::new(AtomicU32::new(0));
+        let remaining_sec_clone = remaining_sec.clone();
+        
+        thread::spawn(move || {
+            let mut is_active = false;
+            loop {
+                is_active =match from_countdown.try_recv(){
+                    Ok(state) => {state}
+                    Err(_) => {
+                        is_active
+                    }
+                };
+                if is_active && remaining_sec_clone.as_ref().load(Ordering::SeqCst) > 0u32 {
+                    remaining_sec_clone.fetch_sub(1, Ordering::SeqCst);
+                }
+                sleep(Duration::from_secs(1));
+            }
+        });
+
+        Self{
+            pomodoro_lengths : vec![
+                PomodoroLength::new(25 * 60, 5  * 60),
+                PomodoroLength::new(25  * 60, 5  * 60),
+                PomodoroLength::new(25  * 60, 5  * 60),
+                PomodoroLength::new(25  * 60, 5  * 60),
+                PomodoroLength::new(25  * 60, 15  * 60),
+            ],
+            position: 0,
+            pomodoro_state: PomodoroState::Stop,
+            pomodoro_phase: PomodoroPhase::Focus,
+            remaining_sec,
+            counter_pipe: to_pomodoro_timer
+        }
+    }
+    
+    fn start(&mut self) {
+        self.remaining_sec.store(self.pomodoro_lengths[self.position].focus, Ordering::SeqCst);
+        self.counter_pipe.send(true).unwrap();
+        self.pomodoro_state = PomodoroState::Run;
+    }
+    
+    fn pause(&mut self){
+        self.counter_pipe.send(false).unwrap();
+        self.pomodoro_state = PomodoroState::Pause;
+    }
+    
+    fn resume(&mut self){
+        self.counter_pipe.send(true).unwrap();
+        self.pomodoro_state = PomodoroState::Run;
+
+    }
+    
+    fn stop (&mut self){
+        self.counter_pipe.send(false).unwrap();
+        self.remaining_sec.store(0, Ordering::SeqCst);
+        self.position = 0;
+        self.pomodoro_state = PomodoroState::Stop;
+    }
+}
+struct PomodoroLength {
+    focus:u32,
+    relax:u32,
+}
+
+impl PomodoroLength {
+    fn new(focus : u32, relax: u32) -> Self{
+        Self{
+            focus,
+            relax
+        }
+    }
+}
+
+
 
 /// This is the enum that contains all the possible variants that your application will need to transmit messages.
 /// This is used to communicate between the different parts of your application.
@@ -31,13 +129,8 @@ pub struct CosmicPomodoro {
 pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
-}
-
-/// Identifies a page in the application.
-pub enum Page {
-    Page1,
-    Page2,
-    Page3,
+    StartTimer,
+    Refresh
 }
 
 /// Identifies a context page to display in the context drawer.
@@ -53,6 +146,18 @@ impl ContextPage {
             Self::About => fl!("about"),
         }
     }
+}
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum PomodoroState{
+    Stop,
+    Run,
+    Pause,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum PomodoroPhase{
+    Focus,
+    Relax
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,11 +200,6 @@ impl Application for CosmicPomodoro {
         &mut self.core
     }
 
-    /// Instructs the cosmic runtime to use this model as the nav bar model.
-    fn nav_model(&self) -> Option<&nav_bar::Model> {
-        Some(&self.nav)
-    }
-
     /// This is the entry point of your application, it is where you initialize your application.
     ///
     /// Any work that needs to be done before the application starts should be done here.
@@ -108,29 +208,11 @@ impl Application for CosmicPomodoro {
     /// - `flags` is used to pass in any data that your application needs to use before it starts.
     /// - `Command` type is used to send messages to your application. `Command::none()` can be used to send no messages to your application.
     fn init(core: Core, _flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let mut nav = nav_bar::Model::default();
-
-        nav.insert()
-            .text("Page 1")
-            .data::<Page>(Page::Page1)
-            .icon(icon::from_name("applications-science-symbolic"))
-            .activate();
-
-        nav.insert()
-            .text("Page 2")
-            .data::<Page>(Page::Page2)
-            .icon(icon::from_name("applications-system-symbolic"));
-
-        nav.insert()
-            .text("Page 3")
-            .data::<Page>(Page::Page3)
-            .icon(icon::from_name("applications-games-symbolic"));
-
         let mut app = CosmicPomodoro {
             core,
             context_page: ContextPage::default(),
             key_binds: HashMap::new(),
-            nav,
+            pomodoro_timer: PomodoroTimer::new(),
         };
 
         let command = app.update_titles();
@@ -138,10 +220,21 @@ impl Application for CosmicPomodoro {
         (app, command)
     }
 
+    /// Display a context drawer if the context page is requested.
+    fn context_drawer(&self) -> Option<Element<Self::Message>> {
+        if !self.core.window.show_context {
+            return None;
+        }
+
+        Some(match self.context_page {
+            ContextPage::About => self.about(),
+        })
+    }
+
     /// Elements to pack at the start of the header bar.
     fn header_start(&self) -> Vec<Element<Self::Message>> {
         let menu_bar = menu::bar(vec![menu::Tree::with_children(
-            menu::root(fl!("view")),
+            menu::root(fl!("menu")),
             menu::items(
                 &self.key_binds,
                 vec![menu::Item::Button(fl!("about"), MenuAction::About)],
@@ -151,20 +244,9 @@ impl Application for CosmicPomodoro {
         vec![menu_bar.into()]
     }
 
-    /// This is the main view of your application, it is the root of your widget tree.
-    ///
-    /// The `Element` type is used to represent the visual elements of your application,
-    /// it has a `Message` associated with it, which dictates what type of message it can send.
-    ///
-    /// To get a better sense of which widgets are available, check out the `widget` module.
-    fn view(&self) -> Element<Self::Message> {
-        widget::text::title1(fl!("welcome"))
-            .apply(widget::container)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
-            .into()
+    /// Instructs the cosmic runtime to use this model as the nav bar model.
+    fn nav_model(&self) -> Option<&nav_bar::Model> {
+        None
     }
 
     /// Application messages are handled here. The application state can be modified based on
@@ -189,28 +271,85 @@ impl Application for CosmicPomodoro {
                 // Set the title of the context drawer.
                 self.set_context_title(context_page.title());
             }
+            Message::StartTimer => {
+                match self.pomodoro_timer.pomodoro_state {
+                    PomodoroState::Stop => {
+                        self.pomodoro_timer.start()
+                    }
+                    PomodoroState::Run => {
+                        self.pomodoro_timer.pause()
+                    }
+                    PomodoroState::Pause => {
+                        self.pomodoro_timer.resume()
+                    }
+                } 
+                
+            }
+            Message::Refresh => {
+                if self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) == 0u32{
+                    match self.pomodoro_timer.pomodoro_phase{
+                        PomodoroPhase::Focus => {
+                            self.pomodoro_timer.pomodoro_phase = PomodoroPhase::Relax;
+                            self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax, Ordering::SeqCst);
+                        }
+                        PomodoroPhase::Relax => {
+                            self.pomodoro_timer.position += 1;
+                            if self.pomodoro_timer.position >= self.pomodoro_timer.pomodoro_lengths.len(){
+                                self.pomodoro_timer.position = 0;
+                            }
+                            self.pomodoro_timer.pomodoro_phase = PomodoroPhase::Focus;
+                            self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax, Ordering::SeqCst);
+                        }
+                    }
+                }
+            }
         }
         Command::none()
     }
-
-    /// Display a context drawer if the context page is requested.
-    fn context_drawer(&self) -> Option<Element<Self::Message>> {
-        if !self.core.window.show_context {
-            return None;
+    fn subscription(&self) -> Subscription<Self::Message> {
+        match self.pomodoro_timer.pomodoro_state {
+            PomodoroState::Run => {
+                time::every(Duration::from_millis(250))
+                    .map(|_| Message::Refresh)
+            }
+            PomodoroState::Stop => {Subscription::none()}
+            PomodoroState::Pause => {Subscription::none()}
         }
+    }
+    /// This is the main view of your application, it is the root of your widget tree.
+    ///
+    /// The `Element` type is used to represent the visual elements of your application,
+    /// it has a `Message` associated with it, which dictates what type of message it can send.
+    ///
+    /// To get a better sense of which widgets are available, check out the `widget` module.
+    fn view(&self) -> Element<Self::Message> {
+        
+        let play_button = CosmicPomodoro::get_play_button();
+        let mut root: Vec<Element<Message>> = Vec::new();
+        root.push(widget::row::with_children(
+            vec![widget::column().width(Length::Fill).into(),
+                 play_button.into(),
+                 widget::column().width(Length::Fill).into()
+            ]
+        ).into());
+        match self.pomodoro_timer.pomodoro_state {
+            PomodoroState::Run | PomodoroState::Pause =>{
+                let remaining =Duration::from_secs(self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) as u64);
+                let formated_remaining =format!("{:02}:{:02}",remaining.as_minutes(), remaining.as_seconds());
+                root.push(widget::text(formated_remaining).size(18).width(Length::Fill).horizontal_alignment(Horizontal::Center).into());
+            }
 
-        Some(match self.context_page {
-            ContextPage::About => self.about(),
-        })
+            _ => {}
+        }
+        widget::column::with_children(root)
+            .apply(widget::container)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center)
+            .align_y(Vertical::Center)
+            .into()
     }
 
-    /// Called when a nav item is selected.
-    fn on_nav_select(&mut self, id: nav_bar::Id) -> Command<Self::Message> {
-        // Activate the page in the model.
-        self.nav.activate(id);
-
-        self.update_titles()
-    }
 }
 
 impl CosmicPomodoro {
@@ -240,16 +379,16 @@ impl CosmicPomodoro {
 
     /// Updates the header and window titles.
     pub fn update_titles(&mut self) -> Command<Message> {
-        let mut window_title = fl!("app-title");
-        let mut header_title = String::new();
+        let window_title = fl!("app-title");
 
-        if let Some(page) = self.nav.text(self.nav.active()) {
-            window_title.push_str(" — ");
-            window_title.push_str(page);
-            header_title.push_str(page);
-        }
-
-        self.set_header_title(header_title);
         self.set_window_title(window_title)
+    }
+
+    fn get_play_button() -> widget::button::Button<'static, Message> {
+        let icon_handle = icon_cache::get_icon_cache_handle("play");
+        widget::button(widget::svg(icon_handle))
+            .width(Length::Fill)
+            .style(cosmic::style::Button::Icon)
+            .on_press(Message::StartTimer)
     }
 }
