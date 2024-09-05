@@ -1,4 +1,9 @@
 app-title = COSMIC Pomodoro
+app-version = Version
 about = About
 menu = Menu
 welcome = Welcome to COSMIC! ✨
+before-focus = Start focus timer!
+focus-running = Focus on your tasks!
+before-relax = Take a break!
+relax-running = Enjoy!

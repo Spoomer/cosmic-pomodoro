@@ -1,27 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::HashMap;
-use std::sync::{mpsc, Arc};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
-use std::thread;
-use std::thread::sleep;
-use std::time::Duration;
+use crate::duration_extension::TimeDurationExt;
 use crate::{fl, icon_cache};
 use cosmic::app::{Command, Core};
 use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, ContentFit, Length, Subscription};
-use cosmic::widget::{self, container, icon, menu, nav_bar, svg};
-use cosmic::{cosmic_theme, theme, Application, ApplicationExt, Apply, Element};
-use cosmic::iced::window::Id;
-use cosmic::iced_core::widget::operation::Focusable;
-use cosmic::theme::iced;
-use cosmic::widget::menu::Item::Button;
 use cosmic::iced::time;
-use crate::duration_extension::TimeDurationExt;
-use crate::icon_cache::IconCache;
+use cosmic::iced::{Alignment, ContentFit, Length, Subscription};
+use cosmic::widget::{self, menu};
+use cosmic::{cosmic_theme, theme, Application, ApplicationExt, Apply, Element};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc};
+use std::thread;
+use std::thread::sleep;
+use std::time::Duration;
 
 const REPOSITORY: &str = "https://github.com/Spoomer/cosmic-pomodoro";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// This is the struct that represents your application.
 /// It is used to define the data that will be used by your application.
@@ -35,26 +31,37 @@ pub struct CosmicPomodoro {
     pomodoro_timer: PomodoroTimer,
 }
 
-struct PomodoroTimer{
+struct PomodoroTimer {
     pomodoro_lengths: Vec<PomodoroLength>,
     position: usize,
     pomodoro_state: PomodoroState,
     pomodoro_phase: PomodoroPhase,
     remaining_sec: Arc<AtomicU32>,
-    counter_pipe: Sender<bool>
+    counter_pipe: Sender<bool>,
 }
-impl PomodoroTimer{
+impl PomodoroTimer {
     fn new() -> Self {
         let (to_pomodoro_timer, from_countdown) = mpsc::channel::<bool>();
-    
-        let remaining_sec = Arc::new(AtomicU32::new(0));
+        //test
+        let pomodoro_lengths = vec![
+            PomodoroLength::new(10, 5),
+            PomodoroLength::new(10, 5)
+        ];
+        // let pomodoro_lengths = vec![
+        //     PomodoroLength::new(25 * 60, 5 * 60),
+        //     PomodoroLength::new(25 * 60, 5 * 60),
+        //     PomodoroLength::new(25 * 60, 5 * 60),
+        //     PomodoroLength::new(25 * 60, 5 * 60),
+        //     PomodoroLength::new(25 * 60, 15 * 60),
+        // ];
+        let remaining_sec = Arc::new(AtomicU32::new(pomodoro_lengths[0].focus));
         let remaining_sec_clone = remaining_sec.clone();
-        
+
         thread::spawn(move || {
             let mut is_active = false;
             loop {
-                is_active =match from_countdown.try_recv(){
-                    Ok(state) => {state}
+                is_active = match from_countdown.try_recv() {
+                    Ok(state) => { state }
                     Err(_) => {
                         is_active
                     }
@@ -66,40 +73,33 @@ impl PomodoroTimer{
             }
         });
 
-        Self{
-            pomodoro_lengths : vec![
-                PomodoroLength::new(25 * 60, 5  * 60),
-                PomodoroLength::new(25  * 60, 5  * 60),
-                PomodoroLength::new(25  * 60, 5  * 60),
-                PomodoroLength::new(25  * 60, 5  * 60),
-                PomodoroLength::new(25  * 60, 15  * 60),
-            ],
+        Self {
+            pomodoro_lengths,
             position: 0,
             pomodoro_state: PomodoroState::Stop,
-            pomodoro_phase: PomodoroPhase::Focus,
+            pomodoro_phase: PomodoroPhase::BeforeFocus,
             remaining_sec,
-            counter_pipe: to_pomodoro_timer
+            counter_pipe: to_pomodoro_timer,
         }
     }
-    
+
     fn start(&mut self) {
         self.remaining_sec.store(self.pomodoro_lengths[self.position].focus, Ordering::SeqCst);
         self.counter_pipe.send(true).unwrap();
         self.pomodoro_state = PomodoroState::Run;
     }
-    
-    fn pause(&mut self){
+
+    fn pause(&mut self) {
         self.counter_pipe.send(false).unwrap();
         self.pomodoro_state = PomodoroState::Pause;
     }
-    
-    fn resume(&mut self){
+
+    fn resume(&mut self) {
         self.counter_pipe.send(true).unwrap();
         self.pomodoro_state = PomodoroState::Run;
-
     }
-    
-    fn stop (&mut self){
+
+    fn stop(&mut self) {
         self.counter_pipe.send(false).unwrap();
         self.remaining_sec.store(0, Ordering::SeqCst);
         self.position = 0;
@@ -107,19 +107,18 @@ impl PomodoroTimer{
     }
 }
 struct PomodoroLength {
-    focus:u32,
-    relax:u32,
+    focus: u32,
+    relax: u32,
 }
 
 impl PomodoroLength {
-    fn new(focus : u32, relax: u32) -> Self{
-        Self{
+    fn new(focus: u32, relax: u32) -> Self {
+        Self {
             focus,
-            relax
+            relax,
         }
     }
 }
-
 
 
 /// This is the enum that contains all the possible variants that your application will need to transmit messages.
@@ -130,7 +129,7 @@ pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
     StartTimer,
-    Refresh
+    Refresh,
 }
 
 /// Identifies a context page to display in the context drawer.
@@ -148,16 +147,18 @@ impl ContextPage {
     }
 }
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum PomodoroState{
+enum PomodoroState {
     Stop,
     Run,
     Pause,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum PomodoroPhase{
+enum PomodoroPhase {
+    BeforeFocus,
     Focus,
-    Relax
+    BeforeRelax,
+    Relax,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -244,11 +245,6 @@ impl Application for CosmicPomodoro {
         vec![menu_bar.into()]
     }
 
-    /// Instructs the cosmic runtime to use this model as the nav bar model.
-    fn nav_model(&self) -> Option<&nav_bar::Model> {
-        None
-    }
-
     /// Application messages are handled here. The application state can be modified based on
     /// what message was received. Commands may be returned for asynchronous execution on a
     /// background thread managed by the application's executor.
@@ -274,6 +270,12 @@ impl Application for CosmicPomodoro {
             Message::StartTimer => {
                 match self.pomodoro_timer.pomodoro_state {
                     PomodoroState::Stop => {
+                        self.pomodoro_timer.pomodoro_phase = match self.pomodoro_timer.pomodoro_phase {
+                            PomodoroPhase::BeforeFocus => PomodoroPhase::Focus,
+                            PomodoroPhase::Focus => PomodoroPhase::BeforeRelax,
+                            PomodoroPhase::BeforeRelax => PomodoroPhase::Relax,
+                            PomodoroPhase::Relax => PomodoroPhase::BeforeFocus,
+                        };
                         self.pomodoro_timer.start()
                     }
                     PomodoroState::Run => {
@@ -282,22 +284,25 @@ impl Application for CosmicPomodoro {
                     PomodoroState::Pause => {
                         self.pomodoro_timer.resume()
                     }
-                } 
-                
+                }
             }
             Message::Refresh => {
-                if self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) == 0u32{
-                    match self.pomodoro_timer.pomodoro_phase{
+                if self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) == 0u32 {
+                    match self.pomodoro_timer.pomodoro_phase {
+                        PomodoroPhase::BeforeFocus => {}
                         PomodoroPhase::Focus => {
-                            self.pomodoro_timer.pomodoro_phase = PomodoroPhase::Relax;
+                            self.pomodoro_timer.pomodoro_phase = PomodoroPhase::BeforeRelax;
+                            self.pomodoro_timer.stop();
                             self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax, Ordering::SeqCst);
                         }
+                        PomodoroPhase::BeforeRelax => {}
                         PomodoroPhase::Relax => {
                             self.pomodoro_timer.position += 1;
-                            if self.pomodoro_timer.position >= self.pomodoro_timer.pomodoro_lengths.len(){
+                            if self.pomodoro_timer.position >= self.pomodoro_timer.pomodoro_lengths.len() {
                                 self.pomodoro_timer.position = 0;
                             }
-                            self.pomodoro_timer.pomodoro_phase = PomodoroPhase::Focus;
+                            self.pomodoro_timer.pomodoro_phase = PomodoroPhase::BeforeFocus;
+                            self.pomodoro_timer.stop();
                             self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax, Ordering::SeqCst);
                         }
                     }
@@ -312,8 +317,8 @@ impl Application for CosmicPomodoro {
                 time::every(Duration::from_millis(250))
                     .map(|_| Message::Refresh)
             }
-            PomodoroState::Stop => {Subscription::none()}
-            PomodoroState::Pause => {Subscription::none()}
+            PomodoroState::Stop => { Subscription::none() }
+            PomodoroState::Pause => { Subscription::none() }
         }
     }
     /// This is the main view of your application, it is the root of your widget tree.
@@ -323,39 +328,65 @@ impl Application for CosmicPomodoro {
     ///
     /// To get a better sense of which widgets are available, check out the `widget` module.
     fn view(&self) -> Element<Self::Message> {
-        
-        let mut root: Vec<Element<Message>> = Vec::new();
-        let play_pause_button : widget::button::Button<'static, Message>;
+        let mut root = widget::column::with_capacity(3).spacing(24);
+        let play_pause_button: widget::button::Button<'static, Message>;
         match self.pomodoro_timer.pomodoro_state {
-            PomodoroState::Pause | PomodoroState::Stop =>{
+            PomodoroState::Pause | PomodoroState::Stop => {
                 play_pause_button = CosmicPomodoro::get_play_button();
             }
             PomodoroState::Run => {
                 play_pause_button = CosmicPomodoro::get_pause_button();
             }
         }
-        
-        root.push(widget::row::with_children(
+        match self.pomodoro_timer.pomodoro_phase {
+            PomodoroPhase::BeforeFocus => {
+                root = root.push(widget::text::heading(fl!("before-focus"))
+                    .size(26)
+                    .width(Length::Fill)
+                    .horizontal_alignment(Horizontal::Center))
+            }
+            PomodoroPhase::Focus => {
+                root = root.push(widget::text::heading(fl!("focus-running"))
+                    .size(26)
+                    .width(Length::Fill)
+                    .horizontal_alignment(Horizontal::Center))
+            }
+            PomodoroPhase::BeforeRelax => {
+                root = root.push(widget::text::heading(fl!("before-relax"))
+                    .size(26)
+                    .width(Length::Fill)
+                    .horizontal_alignment(Horizontal::Center))
+            }
+            PomodoroPhase::Relax => {
+                root = root.push(widget::text::heading(fl!("relax-running"))
+                    .size(26)
+                    .width(Length::Fill)
+                    .horizontal_alignment(Horizontal::Center))
+            }
+        }
+        root = root.push(widget::row::with_children(
             vec![widget::column().width(Length::Fill).into(),
                  play_pause_button.width(Length::FillPortion(2)).into(),
                  widget::column().width(Length::Fill).into()
             ]
-        ).into());
-        
-        let remaining =Duration::from_secs(self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) as u64);
-        let formated_remaining =format!("{:02}:{:02}",remaining.as_minutes(), remaining.as_seconds());
-        root.push(widget::text(formated_remaining).size(18).width(Length::Fill).horizontal_alignment(Horizontal::Center).into());
+        ));
 
-        
-        widget::column::with_children(root)
-            .apply(widget::container)
+        let remaining = Duration::from_secs(self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) as u64);
+        let formated_remaining = format!("{:02}:{:02}", remaining.as_minutes(), remaining.as_seconds());
+        root = root.push(widget::text::heading(formated_remaining)
+            .size(26)
+            .width(Length::Fill)
+            .horizontal_alignment(Horizontal::Center)
+        );
+
+
+        root.apply(widget::container)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Horizontal::Center)
             .align_y(Vertical::Center)
             .into()
     }
-
 }
 
 impl CosmicPomodoro {
@@ -369,7 +400,7 @@ impl CosmicPomodoro {
         ));
 
         let title = widget::text::title3(fl!("app-title"));
-
+        let version = widget::text::title4(fl!("app-version") + ": " + VERSION);
         let link = widget::button::link(REPOSITORY)
             .on_press(Message::LaunchUrl(REPOSITORY.to_string()))
             .padding(0);
@@ -377,6 +408,7 @@ impl CosmicPomodoro {
         widget::column()
             .push(icon)
             .push(title)
+            .push(version)
             .push(link)
             .align_items(Alignment::Center)
             .spacing(space_xxs)
