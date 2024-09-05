@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 384 512"><!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.-->
-  <path
-    d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80L0 432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/>
+<?xml version="1.0" encoding="utf-8"?>
+<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <defs/>
+  <path d="M 500 250 C 500 388.071 388.071 500 250 500 C 111.929 500 0 388.071 0 250 C 0 111.929 111.929 0 250 0 C 388.071 0 500 111.929 500 250 Z" style="stroke: rgb(0, 0, 0); paint-order: stroke; fill: rgb(39, 39, 39); transform-box: fill-box; transform-origin: 50% 50%;" transform="matrix(-1, 0, 0, -1, 0.000021, 0.000021)"/>
+  <path d="M 231.196 130.608 C 238.897 116.573 246.755 116.573 254.771 130.608 L 350.941 299.03 C 358.953 313.063 355.103 320.082 339.389 320.082 L 150.82 320.082 C 135.105 320.082 131.098 313.063 138.798 299.03 L 231.196 130.608 Z" style="stroke: rgb(0, 0, 0); fill: rgb(204, 204, 204); transform-origin: 245.041px 250.041px;" transform="matrix(0, 1, -1, 0, 0.000011, -0.000009)"/>
 </svg>

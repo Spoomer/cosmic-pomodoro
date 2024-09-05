@@ -19,6 +19,7 @@ impl IconCache {
             };
         }
         bundle!("play");
+        bundle!("pause");
         Self { cache }
     }
 

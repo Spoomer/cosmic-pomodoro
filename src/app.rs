@@ -10,7 +10,7 @@ use std::time::Duration;
 use crate::{fl, icon_cache};
 use cosmic::app::{Command, Core};
 use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::iced::{Alignment, ContentFit, Length, Subscription};
 use cosmic::widget::{self, container, icon, menu, nav_bar, svg};
 use cosmic::{cosmic_theme, theme, Application, ApplicationExt, Apply, Element};
 use cosmic::iced::window::Id;
@@ -324,23 +324,29 @@ impl Application for CosmicPomodoro {
     /// To get a better sense of which widgets are available, check out the `widget` module.
     fn view(&self) -> Element<Self::Message> {
         
-        let play_button = CosmicPomodoro::get_play_button();
         let mut root: Vec<Element<Message>> = Vec::new();
+        let play_pause_button : widget::button::Button<'static, Message>;
+        match self.pomodoro_timer.pomodoro_state {
+            PomodoroState::Pause | PomodoroState::Stop =>{
+                play_pause_button = CosmicPomodoro::get_play_button();
+            }
+            PomodoroState::Run => {
+                play_pause_button = CosmicPomodoro::get_pause_button();
+            }
+        }
+        
         root.push(widget::row::with_children(
             vec![widget::column().width(Length::Fill).into(),
-                 play_button.into(),
+                 play_pause_button.width(Length::FillPortion(2)).into(),
                  widget::column().width(Length::Fill).into()
             ]
         ).into());
-        match self.pomodoro_timer.pomodoro_state {
-            PomodoroState::Run | PomodoroState::Pause =>{
-                let remaining =Duration::from_secs(self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) as u64);
-                let formated_remaining =format!("{:02}:{:02}",remaining.as_minutes(), remaining.as_seconds());
-                root.push(widget::text(formated_remaining).size(18).width(Length::Fill).horizontal_alignment(Horizontal::Center).into());
-            }
+        
+        let remaining =Duration::from_secs(self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) as u64);
+        let formated_remaining =format!("{:02}:{:02}",remaining.as_minutes(), remaining.as_seconds());
+        root.push(widget::text(formated_remaining).size(18).width(Length::Fill).horizontal_alignment(Horizontal::Center).into());
 
-            _ => {}
-        }
+        
         widget::column::with_children(root)
             .apply(widget::container)
             .width(Length::Fill)
@@ -386,9 +392,17 @@ impl CosmicPomodoro {
 
     fn get_play_button() -> widget::button::Button<'static, Message> {
         let icon_handle = icon_cache::get_icon_cache_handle("play");
-        widget::button(widget::svg(icon_handle))
+        widget::button(widget::svg(icon_handle).content_fit(ContentFit::Contain))
             .width(Length::Fill)
-            .style(cosmic::style::Button::Icon)
+            .style(cosmic::style::Button::IconVertical)
+            .on_press(Message::StartTimer)
+    }
+
+    fn get_pause_button() -> widget::button::Button<'static, Message> {
+        let icon_handle = icon_cache::get_icon_cache_handle("pause");
+        widget::button(widget::svg(icon_handle).content_fit(ContentFit::Contain))
+            .width(Length::Fill)
+            .style(cosmic::style::Button::IconVertical)
             .on_press(Message::StartTimer)
     }
 }

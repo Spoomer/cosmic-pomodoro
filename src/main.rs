@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use cosmic::iced;
 use app::CosmicPomodoro;
 /// The `app` module is used by convention to indicate the main component of our application.
 mod app;
@@ -13,6 +14,7 @@ mod duration_extension;
 /// - `()` is the flags that your app needs to use before it starts.
 ///  If your app does not need any flags, you can pass in `()`.
 fn main() -> cosmic::iced::Result {
-    let settings = cosmic::app::Settings::default();
+    let mut settings = cosmic::app::Settings::default();
+    settings = settings.size(iced::Size::new(512.0, 768.0));
     cosmic::app::run::<CosmicPomodoro>(settings, ())
 }
