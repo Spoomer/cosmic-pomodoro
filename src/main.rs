@@ -5,8 +5,7 @@ use app::CosmicPomodoro;
 /// The `app` module is used by convention to indicate the main component of our application.
 mod app;
 mod core;
-mod icon_cache;
-mod duration_extension;
+mod views;
 
 /// The `cosmic::app::run()` function is the starting point of your application.
 /// It takes two arguments:

@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::duration_extension::TimeDurationExt;
-use crate::{fl, icon_cache};
+use crate::core::duration_extension::TimeDurationExt;
+use crate::core::icon_cache;
+use crate::core::pomodoro_timer::{PomodoroPhase, PomodoroState, PomodoroTimer};
+use crate::fl;
+use crate::views::settings::SettingMessage;
 use cosmic::app::{Command, Core};
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::time;
 use cosmic::iced::{Alignment, ContentFit, Length, Subscription};
 use cosmic::widget::{self, menu};
-use cosmic::{cosmic_theme, theme, Application, ApplicationExt, Apply, Element};
+use cosmic::{cosmic_theme, iced_widget, theme, Application, ApplicationExt, Apply, Element};
+use notify_rust::Notification;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::reader::Reader;
+use quick_xml::Writer;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc};
-use std::thread;
-use std::thread::sleep;
+use std::io::Cursor;
+use std::str;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 const REPOSITORY: &str = "https://github.com/Spoomer/cosmic-pomodoro";
@@ -31,95 +36,6 @@ pub struct CosmicPomodoro {
     pomodoro_timer: PomodoroTimer,
 }
 
-struct PomodoroTimer {
-    pomodoro_lengths: Vec<PomodoroLength>,
-    position: usize,
-    pomodoro_state: PomodoroState,
-    pomodoro_phase: PomodoroPhase,
-    remaining_sec: Arc<AtomicU32>,
-    counter_pipe: Sender<bool>,
-}
-impl PomodoroTimer {
-    fn new() -> Self {
-        let (to_pomodoro_timer, from_countdown) = mpsc::channel::<bool>();
-        //test
-        let pomodoro_lengths = vec![
-            PomodoroLength::new(10, 5),
-            PomodoroLength::new(10, 5)
-        ];
-        // let pomodoro_lengths = vec![
-        //     PomodoroLength::new(25 * 60, 5 * 60),
-        //     PomodoroLength::new(25 * 60, 5 * 60),
-        //     PomodoroLength::new(25 * 60, 5 * 60),
-        //     PomodoroLength::new(25 * 60, 5 * 60),
-        //     PomodoroLength::new(25 * 60, 15 * 60),
-        // ];
-        let remaining_sec = Arc::new(AtomicU32::new(pomodoro_lengths[0].focus));
-        let remaining_sec_clone = remaining_sec.clone();
-
-        thread::spawn(move || {
-            let mut is_active = false;
-            loop {
-                is_active = match from_countdown.try_recv() {
-                    Ok(state) => { state }
-                    Err(_) => {
-                        is_active
-                    }
-                };
-                if is_active && remaining_sec_clone.as_ref().load(Ordering::SeqCst) > 0u32 {
-                    remaining_sec_clone.fetch_sub(1, Ordering::SeqCst);
-                }
-                sleep(Duration::from_secs(1));
-            }
-        });
-
-        Self {
-            pomodoro_lengths,
-            position: 0,
-            pomodoro_state: PomodoroState::Stop,
-            pomodoro_phase: PomodoroPhase::BeforeFocus,
-            remaining_sec,
-            counter_pipe: to_pomodoro_timer,
-        }
-    }
-
-    fn start(&mut self) {
-        self.remaining_sec.store(self.pomodoro_lengths[self.position].focus, Ordering::SeqCst);
-        self.counter_pipe.send(true).unwrap();
-        self.pomodoro_state = PomodoroState::Run;
-    }
-
-    fn pause(&mut self) {
-        self.counter_pipe.send(false).unwrap();
-        self.pomodoro_state = PomodoroState::Pause;
-    }
-
-    fn resume(&mut self) {
-        self.counter_pipe.send(true).unwrap();
-        self.pomodoro_state = PomodoroState::Run;
-    }
-
-    fn stop(&mut self) {
-        self.counter_pipe.send(false).unwrap();
-        self.remaining_sec.store(0, Ordering::SeqCst);
-        self.position = 0;
-        self.pomodoro_state = PomodoroState::Stop;
-    }
-}
-struct PomodoroLength {
-    focus: u32,
-    relax: u32,
-}
-
-impl PomodoroLength {
-    fn new(focus: u32, relax: u32) -> Self {
-        Self {
-            focus,
-            relax,
-        }
-    }
-}
-
 
 /// This is the enum that contains all the possible variants that your application will need to transmit messages.
 /// This is used to communicate between the different parts of your application.
@@ -130,6 +46,7 @@ pub enum Message {
     ToggleContextPage(ContextPage),
     StartTimer,
     Refresh,
+    ChangeSetting(SettingMessage),
 }
 
 /// Identifies a context page to display in the context drawer.
@@ -137,33 +54,22 @@ pub enum Message {
 pub enum ContextPage {
     #[default]
     About,
+    Settings,
 }
 
 impl ContextPage {
     fn title(&self) -> String {
         match self {
             Self::About => fl!("about"),
+            Self::Settings => fl!("settings"),
         }
     }
-}
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum PomodoroState {
-    Stop,
-    Run,
-    Pause,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum PomodoroPhase {
-    BeforeFocus,
-    Focus,
-    BeforeRelax,
-    Relax,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     About,
+    Settings,
 }
 
 impl menu::action::MenuAction for MenuAction {
@@ -172,6 +78,7 @@ impl menu::action::MenuAction for MenuAction {
     fn message(&self) -> Self::Message {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::Settings => { Message::ToggleContextPage(ContextPage::Settings) }
         }
     }
 }
@@ -229,6 +136,7 @@ impl Application for CosmicPomodoro {
 
         Some(match self.context_page {
             ContextPage::About => self.about(),
+            ContextPage::Settings => self.pomodoro_timer.settings.get_settings_view()
         })
     }
 
@@ -238,7 +146,10 @@ impl Application for CosmicPomodoro {
             menu::root(fl!("menu")),
             menu::items(
                 &self.key_binds,
-                vec![menu::Item::Button(fl!("about"), MenuAction::About)],
+                vec![
+                    menu::Item::Button(fl!("about"), MenuAction::About),
+                    menu::Item::Button(fl!("settings"), MenuAction::Settings)
+                ],
             ),
         )]);
 
@@ -294,6 +205,14 @@ impl Application for CosmicPomodoro {
                             self.pomodoro_timer.pomodoro_phase = PomodoroPhase::BeforeRelax;
                             self.pomodoro_timer.stop();
                             self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax, Ordering::SeqCst);
+                            _ = Notification::new()
+                                .summary(&fl!("before-relax"))
+                                .sound_name("window-attention-inactive")
+                                .show();
+                            if self.is_focused() {
+                                self.pomodoro_timer.pomodoro_phase = PomodoroPhase::Relax;
+                                self.pomodoro_timer.start();
+                            }
                         }
                         PomodoroPhase::BeforeRelax => {}
                         PomodoroPhase::Relax => {
@@ -303,10 +222,18 @@ impl Application for CosmicPomodoro {
                             }
                             self.pomodoro_timer.pomodoro_phase = PomodoroPhase::BeforeFocus;
                             self.pomodoro_timer.stop();
-                            self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax, Ordering::SeqCst);
+                            self.pomodoro_timer.remaining_sec.store(self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].focus, Ordering::SeqCst);
+                            _ = Notification::new()
+                                .summary(&fl!("after-relax"))
+                                .body(&fl!("before-focus"))
+                                .sound_name("alarm-clock-elapsed")
+                                .show();
                         }
                     }
                 }
+            }
+            Message::ChangeSetting(setting_message) => {
+                self.pomodoro_timer.settings.update(setting_message);
             }
         }
         Command::none()
@@ -328,14 +255,23 @@ impl Application for CosmicPomodoro {
     ///
     /// To get a better sense of which widgets are available, check out the `widget` module.
     fn view(&self) -> Element<Self::Message> {
-        let mut root = widget::column::with_capacity(3).spacing(24);
+        let remaining_secs = self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst);
+        let cosmic_theme::Spacing { space_m, .. } = theme::active().cosmic().spacing;
+        let mut root = widget::column::with_capacity(3).spacing(space_m);
         let play_pause_button: widget::button::Button<'static, Message>;
         match self.pomodoro_timer.pomodoro_state {
             PomodoroState::Pause | PomodoroState::Stop => {
                 play_pause_button = CosmicPomodoro::get_play_button();
             }
             PomodoroState::Run => {
-                play_pause_button = CosmicPomodoro::get_pause_button();
+                let mut initial_secs: u32 = 0;
+                if self.pomodoro_timer.pomodoro_phase == PomodoroPhase::Relax {
+                    initial_secs = self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax;
+                } else if self.pomodoro_timer.pomodoro_phase == PomodoroPhase::Focus {
+                    initial_secs = self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].focus;
+                }
+
+                play_pause_button = CosmicPomodoro::get_pause_button(initial_secs, remaining_secs);
             }
         }
         match self.pomodoro_timer.pomodoro_phase {
@@ -370,9 +306,9 @@ impl Application for CosmicPomodoro {
                  widget::column().width(Length::Fill).into()
             ]
         ));
+        let remaining_duration = Duration::from_secs(remaining_secs as u64);
 
-        let remaining = Duration::from_secs(self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst) as u64);
-        let formated_remaining = format!("{:02}:{:02}", remaining.as_minutes(), remaining.as_seconds());
+        let formated_remaining = format!("{:02}:{:02}", remaining_duration.as_minutes(), remaining_duration.as_seconds());
         root = root.push(widget::text::heading(formated_remaining)
             .size(26)
             .width(Length::Fill)
@@ -430,11 +366,76 @@ impl CosmicPomodoro {
             .on_press(Message::StartTimer)
     }
 
-    fn get_pause_button() -> widget::button::Button<'static, Message> {
-        let icon_handle = icon_cache::get_icon_cache_handle("pause");
-        widget::button(widget::svg(icon_handle).content_fit(ContentFit::Contain))
+    fn get_pause_button(initial_secs: u32, remaining_secs: u32) -> widget::button::Button<'static, Message> {
+        let percentage = 1.0 -  remaining_secs as f32 / initial_secs as f32;
+        let radian = 2.0 * std::f32::consts::PI * percentage;
+        let icon_svg = icon_cache::get_icon_cache_svg("pause");
+        let content = str::from_utf8(icon_svg.as_ref()).unwrap();
+        let mut reader = Reader::from_str(content);
+        let mut writer = Writer::new(Cursor::new(Vec::new()));
+        loop {
+            match reader.read_event() {
+                Ok(Event::Empty(e)) if e.attributes().any(|attr|
+                    {
+                        if !attr.is_ok() {
+                            return false;
+                        }
+                        let attr = attr.unwrap();
+                        attr.key.local_name().as_ref() == b"id" && attr.value.as_ref() == b"progress-circle"
+                    }) => {
+
+                    let mut elem = BytesStart::new("path");
+
+                    // collect existing attributes except d
+                    elem.extend_attributes(e.attributes()
+                        .map(|attr| attr.unwrap())
+                        .filter(|attr| attr.key.local_name().as_ref() != b"d")
+                    );
+
+                    let data = e.try_get_attribute("d").unwrap().unwrap();
+                    let data_string = str::from_utf8(data.value.as_ref()).unwrap();
+                    let mut parts = data_string.split(' ').collect::<Vec<_>>();
+
+                    let a_position = parts.iter().position(|&part| part.eq("A"));
+                    if a_position.is_none() {
+                        continue;
+                    }
+
+                    let a_position = a_position.unwrap();
+                    let radius = parts[a_position + 1].parse::<f32>().unwrap();
+                    let large_arc_postion = a_position + 4;
+                    let x_position = a_position + 6;
+                    let y_position = a_position + 7;
+                    if percentage > 0.5 {
+                        parts[large_arc_postion] = "1";
+                    } else {
+                        parts[large_arc_postion] = "0";
+                    }
+                    let x = (260.0 + radian.cos() * radius).to_string();
+                    parts[x_position] = &x;
+                    let y = (260.0 + radian.sin() * radius).to_string();
+                    parts[y_position] = &y;
+                    let path = parts.join(" ");
+                    elem.push_attribute(("d", path.as_str()));
+                    // writes the event to the writer
+                    writer.write_event(Event::Empty(elem)).expect("xml writer error");
+                }
+                Ok(Event::Eof) => break,
+                // we can either move or borrow the event to write, depending on your use-case
+                Ok(e) => assert!(writer.write_event(e).is_ok()),
+                Err(e) => panic!("Error at position {}: {:?}", reader.error_position(), e),
+            }
+        }
+        let icon_svg = writer.into_inner().into_inner();
+        widget::button(widget::svg(iced_widget::svg::Handle::from_memory(icon_svg)).content_fit(ContentFit::Contain))
             .width(Length::Fill)
             .style(cosmic::style::Button::IconVertical)
             .on_press(Message::StartTimer)
+    }
+    fn is_focused(&self) -> bool {
+        match self.core.focused_window() {
+            Some(_) => true,
+            None => false,
+        }
     }
 }
