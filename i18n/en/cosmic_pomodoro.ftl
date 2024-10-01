@@ -7,5 +7,9 @@ before-relax = Take a break!
 focus-running = Focus on your tasks!
 menu = Menu
 relax-running = Enjoy!
+welcome = Welcome to COSMIC!
+
 settings = Settings
-welcome = Welcome to COSMIC! ✨
+    .end-of-focus-sound = Sound at the end of a focus period
+    .end-of-relax-sound = Sound relax period
+

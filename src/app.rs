@@ -255,23 +255,22 @@ impl Application for CosmicPomodoro {
     ///
     /// To get a better sense of which widgets are available, check out the `widget` module.
     fn view(&self) -> Element<Self::Message> {
+        let mut initial_secs: u32 = 0;
+        if self.pomodoro_timer.pomodoro_phase == PomodoroPhase::Relax {
+            initial_secs = self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax;
+        } else if self.pomodoro_timer.pomodoro_phase == PomodoroPhase::Focus {
+            initial_secs = self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].focus;
+        }
         let remaining_secs = self.pomodoro_timer.remaining_sec.load(Ordering::SeqCst);
         let cosmic_theme::Spacing { space_m, .. } = theme::active().cosmic().spacing;
         let mut root = widget::column::with_capacity(3).spacing(space_m);
         let play_pause_button: widget::button::Button<'static, Message>;
         match self.pomodoro_timer.pomodoro_state {
             PomodoroState::Pause | PomodoroState::Stop => {
-                play_pause_button = CosmicPomodoro::get_play_button();
+                play_pause_button = CosmicPomodoro::get_play_pause_button("play", initial_secs, remaining_secs);
             }
             PomodoroState::Run => {
-                let mut initial_secs: u32 = 0;
-                if self.pomodoro_timer.pomodoro_phase == PomodoroPhase::Relax {
-                    initial_secs = self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].relax;
-                } else if self.pomodoro_timer.pomodoro_phase == PomodoroPhase::Focus {
-                    initial_secs = self.pomodoro_timer.pomodoro_lengths[self.pomodoro_timer.position].focus;
-                }
-
-                play_pause_button = CosmicPomodoro::get_pause_button(initial_secs, remaining_secs);
+                play_pause_button = CosmicPomodoro::get_play_pause_button("pause", initial_secs, remaining_secs);
             }
         }
         match self.pomodoro_timer.pomodoro_phase {
@@ -358,18 +357,10 @@ impl CosmicPomodoro {
         self.set_window_title(window_title)
     }
 
-    fn get_play_button() -> widget::button::Button<'static, Message> {
-        let icon_handle = icon_cache::get_icon_cache_handle("play");
-        widget::button(widget::svg(icon_handle).content_fit(ContentFit::Contain))
-            .width(Length::Fill)
-            .style(cosmic::style::Button::IconVertical)
-            .on_press(Message::StartTimer)
-    }
-
-    fn get_pause_button(initial_secs: u32, remaining_secs: u32) -> widget::button::Button<'static, Message> {
+    fn get_play_pause_button(button_name : &'static str, initial_secs: u32, remaining_secs: u32) -> widget::button::Button<'static, Message> {
         let percentage = 1.0 -  remaining_secs as f32 / initial_secs as f32;
         let radian = 2.0 * std::f32::consts::PI * percentage;
-        let icon_svg = icon_cache::get_icon_cache_svg("pause");
+        let icon_svg = icon_cache::get_icon_cache_svg(button_name);
         let content = str::from_utf8(icon_svg.as_ref()).unwrap();
         let mut reader = Reader::from_str(content);
         let mut writer = Writer::new(Cursor::new(Vec::new()));
