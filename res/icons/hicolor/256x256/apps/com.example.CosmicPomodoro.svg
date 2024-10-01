@@ -1,2 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg height="128px" viewBox="0 0 128 128" width="128px" xmlns="http://www.w3.org/2000/svg"/>
+<?xml version="1.0" encoding="utf-8"?>
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient gradientUnits="userSpaceOnUse" cx="107.991" cy="138.768" r="85" id="gradient-0" spreadMethod="reflect" gradientTransform="matrix(1.30956, -0.538506, 0.380312, 0.924858, -86.204896, 68.581093)">
+      <stop offset="0" style="stop-color: rgb(84.706% 25.49% 25.49%)"/>
+      <stop offset="1" style="stop-color: rgb(59.967% 0% 8.4%)"/>
+    </radialGradient>
+  </defs>
+  <g transform="matrix(1, 0, 0, 1, -0.000008, 9.5)">
+    <ellipse style="stroke: rgb(242, 3, 3); paint-order: stroke; fill: url('#gradient-0');" cx="128" cy="121.5" rx="98.704" ry="78.5"/>
+    <path d="M 128.535 36.187 C 132.172 34.324 141.005 36.478 137.368 38.341 L 182.965 49.297 C 182.561 52.337 145.601 48.911 145.872 46.87 C 146.076 46.238 167.121 59.952 165.423 65.216 C 163.975 66.692 127.093 54.724 128.541 53.248 C 129.724 54.409 92.622 66.178 91.594 65.17 C 90.245 64.646 105.625 47.157 107.894 48.039 C 106.618 50.654 69.865 50.715 70.722 48.959 L 119.649 38.331 C 115.608 36.177 124.494 34.033 128.535 36.187 Z" style="paint-order: fill; fill-rule: evenodd; stroke-opacity: 0.32; stroke: rgb(59, 163, 71); fill: rgb(19, 144, 81); transform-box: fill-box; transform-origin: 50% 50%;" transform="matrix(0.999953, 0.009701, -0.009701, 0.999953, 0, 0)"/>
+  </g>
+</svg>
